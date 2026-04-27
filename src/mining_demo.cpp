@@ -5,6 +5,7 @@
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 #include <mp/proxy-io.h>
 
@@ -15,6 +16,50 @@
 #include <interfaces/init.h>
 #include <interfaces/mining.h>
 #include <primitives/block.h>
+#include <primitives/transaction.h>
+#include <primitives/transaction_identifier.h>
+
+constexpr auto ZERO_HEX = "0000000000000000000000000000000000000000000000000000000000000000";
+
+template <typename Results>
+void print_results(const std::string& label, const Results& txs)
+{
+    for (size_t i = 0; i < txs.size(); ++i) {
+        const auto& tx = txs[i];
+        std::cout << label << "[" << i << "] ";
+        if (tx) {
+            std::cout << "hash=" << tx->GetHash().ToString()
+                      << " vin=" << tx->vin.size()
+                      << " vout=" << tx->vout.size() << "\n";
+        } else {
+            std::cout << "<not found>\n";
+        }
+    }
+}
+
+void demo_get_by_txid(interfaces::Mining& mining)
+{
+    auto present = Txid::FromHex("771dbe406037ce5ce81dcd6e3ebc4455250d773acd11aec50bdfd767b6581428");
+    auto missing = Txid::FromHex(ZERO_HEX);
+    if (!present || !missing) {
+        std::cerr << "invalid txid hex\n";
+        return;
+    }
+    std::vector<Txid> txids{*present, *missing};
+    print_results("txid", mining.getTransactionsByTxID(txids));
+}
+
+void demo_get_by_wtxid(interfaces::Mining& mining)
+{
+    auto present = Wtxid::FromHex("31cb811864014697a782cc0f5b400e34b61448ab99be6b957a0288f09ad30530");
+    auto missing = Wtxid::FromHex(ZERO_HEX);
+    if (!present || !missing) {
+        std::cerr << "invalid wtxid hex\n";
+        return;
+    }
+    std::vector<Wtxid> wtxids{*present, *missing};
+    print_results("wtxid", mining.getTransactionsByWitnessID(wtxids));
+}
 
 int main(int argc, char** argv)
 {
@@ -49,23 +94,8 @@ int main(int argc, char** argv)
             return 1;
         }
 
-        if (auto tip = mining->getTip()) {
-            std::cout << "tip height=" << tip->height
-                      << " hash=" << tip->hash.ToString() << "\n";
-        } else {
-            std::cout << "tip: <none>\n";
-        }
-
-        auto tmpl = mining->createNewBlock({}, /*cooldown=*/false);
-        if (!tmpl) {
-            std::cerr << "createNewBlock() returned null\n";
-            return 1;
-        }
-
-        CBlock block = tmpl->getBlock();
-        std::cout << "block version=" << block.nVersion
-                  << " prev=" << block.hashPrevBlock.ToString()
-                  << " tx_count=" << block.vtx.size() << "\n";
+        demo_get_by_txid(*mining);
+        demo_get_by_wtxid(*mining);
     }
 
     loop_thread.join();

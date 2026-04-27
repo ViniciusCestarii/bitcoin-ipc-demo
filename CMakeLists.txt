@@ -27,8 +27,9 @@ set(REDUCE_EXPORTS    ON  CACHE BOOL "" FORCE)
 include(FetchContent)
 FetchContent_Declare(Bitcoin
     GIT_REPOSITORY https://github.com/bitcoin/bitcoin.git
-    GIT_TAG        v31.0
+    GIT_TAG        313aaa0eae4446533b3668360ae0a353cde63312 # refs/pull/34020/head
     GIT_SHALLOW    TRUE
+    GIT_CONFIG     "remote.origin.fetch=+refs/pull/34020/head:refs/remotes/origin/pr/34020"
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(Bitcoin)
