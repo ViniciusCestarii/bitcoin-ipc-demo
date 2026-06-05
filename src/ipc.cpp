@@ -1,19 +1,24 @@
 #include <cstring>
+#include <functional>
 #include <iostream>
+#include <map>
+#include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include <capnp/dynamic.h>
+#include <capnp/pretty-print.h>
 #include <capnp/rpc-twoparty.h>
 #include <kj/async-io.h>
 
-#include <ipc/capnp/mp/proxy.capnp.h>
-#include <ipc/capnp/init.capnp.h>
-#include <ipc/capnp/nodeinfo.capnp.h>
+#include <schemas/capnp/mp/proxy.capnp.h>
+#include <schemas/capnp/init.capnp.h>
+#include <schemas/capnp/noderpc.capnp.h>
 
 int main(int argc, char** argv)
 {
-    if (argc != 2) {
-        std::cerr << "Usage: bitcoin-ipc <path-to-node.sock>\n";
+    if (argc < 3) {
+        std::cerr << "Usage: bitcoin-ipc <path-to-node.sock> <method> [args...]\n";
         return 1;
     }
 
@@ -40,15 +45,59 @@ int main(int argc, char** argv)
     auto makeThreadResp = makeThreadReq.send().wait(io.waitScope);
     auto serverThread = makeThreadResp.getResult();
 
-    auto nodeInfoReq = init.makeNodeInfoRequest();
-    nodeInfoReq.getContext().setThread(serverThread);
-    auto nodeInfo = nodeInfoReq.send().wait(io.waitScope).getResult();
+    auto nodeRpcReq = init.makeNodeRpcRequest();
+    nodeRpcReq.getContext().setThread(serverThread);
+    auto nodeRpc = nodeRpcReq.send().wait(io.waitScope).getResult();
 
-    auto deploymentInfoReq = nodeInfo.getDeploymentInfoRequest();
-    deploymentInfoReq.getContext().setThread(serverThread);
-    auto deploymentInfoResp = deploymentInfoReq.send().wait(io.waitScope);
+    // Pretty-print any response's `result` struct generically
+    auto prettyResult = [&](auto&& resp) {
+        return capnp::prettyPrint(capnp::toDynamic(resp.getResult())).flatten();
+    };
 
-    std::cout << "Chain height: " << deploymentInfoResp.getResult().getHeight() << "\n";
+    using Handler = std::function<kj::String()>;
+    std::map<std::string, Handler> handlers;
 
+    handlers["getNetworkInfo"] = [&] {
+        auto req = nodeRpc.getNetworkInfoRequest();
+        req.getContext().setThread(serverThread);
+        return prettyResult(req.send().wait(io.waitScope));
+    };
+
+    handlers["getDeploymentInfo"] = [&] {
+        auto req = nodeRpc.getDeploymentInfoRequest();
+        req.getContext().setThread(serverThread);
+        return prettyResult(req.send().wait(io.waitScope));
+    };
+
+    handlers["getBlockchainInfo"] = [&] {
+        auto req = nodeRpc.getBlockchainInfoRequest();
+        req.getContext().setThread(serverThread);
+        return prettyResult(req.send().wait(io.waitScope));
+    };
+
+    handlers["estimateSmartFee"] = [&] {
+        // Optional args: <confTarget> <conservative>, defaulting to 6 blocks and true.
+        int confTarget = argc > 3 ? std::stoi(argv[3]) : 6;
+        bool conservative = argc > 4 ? (std::string(argv[4]) == "true" || std::string(argv[4]) == "1") : true;
+
+        auto req = nodeRpc.estimateSmartFeeRequest();
+        req.getContext().setThread(serverThread);
+        req.setConfTarget(confTarget);
+        req.setConservative(conservative);
+        return prettyResult(req.send().wait(io.waitScope));
+    };
+
+    std::string method = argv[2];
+    auto it = handlers.find(method);
+    if (it == handlers.end()) {
+        std::cerr << "Unknown method: " << method << "\n";
+        std::cerr << "Available methods:\n";
+        for (const auto& [name, _] : handlers) {
+            std::cerr << "  - " << name << "\n";
+        }
+        return 1;
+    }
+
+    std::cout << it->second().cStr() << "\n";
     return 0;
 }

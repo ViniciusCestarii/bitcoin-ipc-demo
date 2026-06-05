@@ -8,12 +8,12 @@ find_package(Threads REQUIRED)
 find_package(CapnProto REQUIRED)
 
 set(CAPNP_SCHEMAS
-  src/ipc/capnp/common.capnp
-  src/ipc/capnp/echo.capnp
-  src/ipc/capnp/init.capnp
-  src/ipc/capnp/nodeinfo.capnp
-  src/ipc/capnp/mining.capnp
-  src/ipc/capnp/mp/proxy.capnp
+  src/schemas/capnp/common.capnp
+  src/schemas/capnp/echo.capnp
+  src/schemas/capnp/init.capnp
+  src/schemas/capnp/noderpc.capnp
+  src/schemas/capnp/mining.capnp
+  src/schemas/capnp/mp/proxy.capnp
 )
 
 capnp_generate_cpp(CAPNP_SRCS CAPNP_HDRS ${CAPNP_SCHEMAS})
