@@ -1,8 +1,10 @@
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <iostream>
 #include <map>
 #include <string>
+#include <vector>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -54,6 +56,29 @@ int main(int argc, char** argv)
         return capnp::prettyPrint(capnp::toDynamic(resp.getResult())).flatten();
     };
 
+    // Decode a display block hash (big-endian hex) into the raw internal byte
+    // order expected by the IPC `Data` field (reversed).
+    auto hashHexToBytes = [](const std::string& hex) {
+        std::vector<kj::byte> bytes;
+        bytes.reserve(hex.size() / 2);
+        for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+            bytes.push_back(static_cast<kj::byte>(std::stoi(hex.substr(i, 2), nullptr, 16)));
+        }
+        std::reverse(bytes.begin(), bytes.end());
+        return bytes;
+    };
+
+    // Encode raw bytes (e.g. a serialized block) as hex.
+    auto bytesToHex = [](capnp::Data::Reader data) {
+        static const char* digits = "0123456789abcdef";
+        kj::Vector<char> hex(data.size() * 2);
+        for (auto b : data) {
+            hex.add(digits[b >> 4]);
+            hex.add(digits[b & 0x0f]);
+        }
+        return kj::str(hex.asPtr());
+    };
+
     using Handler = std::function<kj::String()>;
     std::map<std::string, Handler> handlers;
 
@@ -85,6 +110,54 @@ int main(int argc, char** argv)
         req.setConfTarget(confTarget);
         req.setConservative(conservative);
         return prettyResult(req.send().wait(io.waitScope));
+    };
+
+    handlers["getBestBlockHash"] = [&] {
+        auto req = nodeRpc.getBestBlockHashRequest();
+        req.getContext().setThread(serverThread);
+        return kj::str(req.send().wait(io.waitScope).getResult());
+    };
+
+    handlers["getBlockHash"] = [&] {
+        // Required arg: <height>
+        if (argc < 4) {
+            std::cerr << "getBlockHash requires <height>\n";
+            return kj::str();
+        }
+        int height = std::stoi(argv[3]);
+
+        auto req = nodeRpc.getBlockHashRequest();
+        req.getContext().setThread(serverThread);
+        req.setHeight(height);
+        return kj::str(req.send().wait(io.waitScope).getResult());
+    };
+
+    handlers["getBlockHeader"] = [&] {
+        // Required arg: <blockHash> (display hex)
+        if (argc < 4) {
+            std::cerr << "getBlockHeader requires <blockHash>\n";
+            return kj::str();
+        }
+        auto hash = hashHexToBytes(argv[3]);
+
+        auto req = nodeRpc.getBlockHeaderRequest();
+        req.getContext().setThread(serverThread);
+        req.setBlockHash(kj::arrayPtr(hash.data(), hash.size()));
+        return prettyResult(req.send().wait(io.waitScope));
+    };
+
+    handlers["getBlock"] = [&] {
+        // Required arg: <blockHash> (display hex); result is the raw block as hex.
+        if (argc < 4) {
+            std::cerr << "getBlock requires <blockHash>\n";
+            return kj::str();
+        }
+        auto hash = hashHexToBytes(argv[3]);
+
+        auto req = nodeRpc.getBlockRequest();
+        req.getContext().setThread(serverThread);
+        req.setBlockHash(kj::arrayPtr(hash.data(), hash.size()));
+        return bytesToHex(req.send().wait(io.waitScope).getResult());
     };
 
     std::string method = argv[2];
