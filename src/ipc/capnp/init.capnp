@@ -8,19 +8,20 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("ipc::capnp::messages");
 
 using Proxy = import "./mp/proxy.capnp";
-using Chain = import "chain.capnp";
+$Proxy.include("interfaces/echo.h");
+$Proxy.include("interfaces/init.h");
+$Proxy.include("interfaces/mining.h");
+$Proxy.include("interfaces/nodeinfo.h");
+$Proxy.includeTypes("ipc/capnp/init-types.h");
+
+using Echo = import "echo.capnp";
+using Mining = import "mining.capnp";
+using NodeInfo = import "nodeinfo.capnp";
 
 interface Init $Proxy.wrap("interfaces::Init") {
     construct @0 (threadMap: Proxy.ThreadMap) -> (threadMap :Proxy.ThreadMap);
-    # NOT USED IN THIS REPO
-    makeEcho @1 (context :Proxy.Context) -> ();
-    # NOT USED IN THIS REPO
-    makeMining @3 (context :Proxy.Context) -> ();
-    # NOT USED IN THIS REPO
-    makeRpc @4 (context :Proxy.Context) -> ();
-
-    makeChain @5 (context :Proxy.Context) -> (result :Chain.Chain);
-
-    # DEPRECATED: no longer supported; server returns an error.
-    makeMiningOld2 @2 () -> ();
+    makeEcho @1 (context :Proxy.Context) -> (result :Echo.Echo);
+    makeMining @2 (context :Proxy.Context) -> (result :Mining.Mining);
+    stop @3 (context :Proxy.Context) -> ();
+    makeNodeInfo @4 (context :Proxy.Context) -> (result :NodeInfo.NodeInfo);
 }
