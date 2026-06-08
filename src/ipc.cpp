@@ -13,14 +13,33 @@
 #include <capnp/rpc-twoparty.h>
 #include <kj/async-io.h>
 
+#include <iomanip>
+#include <sstream>
+
 #include <schemas/capnp/mp/proxy.capnp.h>
 #include <schemas/capnp/init.capnp.h>
-#include <schemas/capnp/noderpc.capnp.h>
+#include <schemas/capnp/chain.capnp.h>
+
+class NotificationsImpl final : public ipc::capnp::messages::ChainNotifications::Server
+{
+public:
+    kj::Promise<void> transactionAddedToMempool(TransactionAddedToMempoolContext context) override
+    {
+        auto tx = context.getParams().getTx();
+        std::ostringstream hex;
+        for (auto byte : tx) {
+            hex << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
+        }
+        std::cout << "transactionAddedToMempool: " << tx.size() << " bytes, raw=" << hex.str() << "\n";
+        std::cout.flush();
+        return kj::READY_NOW;
+    }
+};
 
 int main(int argc, char** argv)
 {
-    if (argc < 3) {
-        std::cerr << "Usage: bitcoin-ipc <path-to-node.sock> <method> [args...]\n";
+    if (argc != 2) {
+        std::cerr << "Usage: bitcoin-ipc <path-to-node.sock>\n";
         return 1;
     }
 
@@ -42,135 +61,23 @@ int main(int argc, char** argv)
     auto constructResp = constructReq.send().wait(io.waitScope);
     auto serverThreadMap = constructResp.getThreadMap();
 
-    auto makeThreadReq = serverThreadMap.makeThreadRequest();
-    makeThreadReq.setName("client");
-    auto makeThreadResp = makeThreadReq.send().wait(io.waitScope);
-    auto serverThread = makeThreadResp.getResult();
+    auto makePoolReq = serverThreadMap.makePoolRequest();
+    makePoolReq.setName("client");
+    makePoolReq.setCount(2);
+    makePoolReq.send().wait(io.waitScope);
 
-    auto nodeRpcReq = init.makeNodeRpcRequest();
-    nodeRpcReq.getContext().setThread(serverThread);
-    auto nodeRpc = nodeRpcReq.send().wait(io.waitScope).getResult();
+    auto chainReq = init.makeChainRequest();
+    auto chain = chainReq.send().wait(io.waitScope).getResult();
 
-    // Pretty-print any response's `result` struct generically
-    auto prettyResult = [&](auto&& resp) {
-        return capnp::prettyPrint(capnp::toDynamic(resp.getResult())).flatten();
-    };
+    auto handleNotificationReq = chain.handleNotificationsRequest();
+    handleNotificationReq.setNotifications(kj::heap<NotificationsImpl>());
+    // Keep the Handler alive for the lifetime of the program; dropping it
+    // unregisters the notifications on the node side.
+    auto handler = handleNotificationReq.send().wait(io.waitScope).getResult();
 
-    // Decode a display block hash (big-endian hex) into the raw internal byte
-    // order expected by the IPC `Data` field (reversed).
-    auto hashHexToBytes = [](const std::string& hex) {
-        std::vector<kj::byte> bytes;
-        bytes.reserve(hex.size() / 2);
-        for (size_t i = 0; i + 1 < hex.size(); i += 2) {
-            bytes.push_back(static_cast<kj::byte>(std::stoi(hex.substr(i, 2), nullptr, 16)));
-        }
-        std::reverse(bytes.begin(), bytes.end());
-        return bytes;
-    };
+    std::cout << "Listening for transactionAddedToMempool notifications...\n";
+    std::cout.flush();
 
-    // Encode raw bytes (e.g. a serialized block) as hex.
-    auto bytesToHex = [](capnp::Data::Reader data) {
-        static const char* digits = "0123456789abcdef";
-        kj::Vector<char> hex(data.size() * 2);
-        for (auto b : data) {
-            hex.add(digits[b >> 4]);
-            hex.add(digits[b & 0x0f]);
-        }
-        return kj::str(hex.asPtr());
-    };
-
-    using Handler = std::function<kj::String()>;
-    std::map<std::string, Handler> handlers;
-
-    handlers["getNetworkInfo"] = [&] {
-        auto req = nodeRpc.getNetworkInfoRequest();
-        req.getContext().setThread(serverThread);
-        return prettyResult(req.send().wait(io.waitScope));
-    };
-
-    handlers["getDeploymentInfo"] = [&] {
-        auto req = nodeRpc.getDeploymentInfoRequest();
-        req.getContext().setThread(serverThread);
-        return prettyResult(req.send().wait(io.waitScope));
-    };
-
-    handlers["getBlockchainInfo"] = [&] {
-        auto req = nodeRpc.getBlockchainInfoRequest();
-        req.getContext().setThread(serverThread);
-        return prettyResult(req.send().wait(io.waitScope));
-    };
-
-    handlers["estimateSmartFee"] = [&] {
-        // Optional args: <confTarget> <conservative>, defaulting to 6 blocks and true.
-        int confTarget = argc > 3 ? std::stoi(argv[3]) : 6;
-        bool conservative = argc > 4 ? (std::string(argv[4]) == "true" || std::string(argv[4]) == "1") : true;
-
-        auto req = nodeRpc.estimateSmartFeeRequest();
-        req.getContext().setThread(serverThread);
-        req.setConfTarget(confTarget);
-        req.setConservative(conservative);
-        return prettyResult(req.send().wait(io.waitScope));
-    };
-
-    handlers["getBestBlockHash"] = [&] {
-        auto req = nodeRpc.getBestBlockHashRequest();
-        req.getContext().setThread(serverThread);
-        return kj::str(req.send().wait(io.waitScope).getResult());
-    };
-
-    handlers["getBlockHash"] = [&] {
-        // Required arg: <height>
-        if (argc < 4) {
-            std::cerr << "getBlockHash requires <height>\n";
-            return kj::str();
-        }
-        int height = std::stoi(argv[3]);
-
-        auto req = nodeRpc.getBlockHashRequest();
-        req.getContext().setThread(serverThread);
-        req.setHeight(height);
-        return kj::str(req.send().wait(io.waitScope).getResult());
-    };
-
-    handlers["getBlockHeader"] = [&] {
-        // Required arg: <blockHash> (display hex)
-        if (argc < 4) {
-            std::cerr << "getBlockHeader requires <blockHash>\n";
-            return kj::str();
-        }
-        auto hash = hashHexToBytes(argv[3]);
-
-        auto req = nodeRpc.getBlockHeaderRequest();
-        req.getContext().setThread(serverThread);
-        req.setBlockHash(kj::arrayPtr(hash.data(), hash.size()));
-        return prettyResult(req.send().wait(io.waitScope));
-    };
-
-    handlers["getBlock"] = [&] {
-        // Required arg: <blockHash> (display hex); result is the raw block as hex.
-        if (argc < 4) {
-            std::cerr << "getBlock requires <blockHash>\n";
-            return kj::str();
-        }
-        auto hash = hashHexToBytes(argv[3]);
-
-        auto req = nodeRpc.getBlockRequest();
-        req.getContext().setThread(serverThread);
-        req.setBlockHash(kj::arrayPtr(hash.data(), hash.size()));
-        return bytesToHex(req.send().wait(io.waitScope).getResult());
-    };
-
-    std::string method = argv[2];
-    auto it = handlers.find(method);
-    if (it == handlers.end()) {
-        std::cerr << "Unknown method: " << method << "\n";
-        std::cerr << "Available methods:\n";
-        for (const auto& [name, _] : handlers) {
-            std::cerr << "  - " << name << "\n";
-        }
-        return 1;
-    }
-
-    std::cout << it->second().cStr() << "\n";
-    return 0;
+    // Run the event loop forever so the node can call back into our capability.
+    kj::NEVER_DONE.wait(io.waitScope);
 }

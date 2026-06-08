@@ -11,8 +11,12 @@ set(CAPNP_SCHEMAS
   src/schemas/capnp/common.capnp
   src/schemas/capnp/echo.capnp
   src/schemas/capnp/init.capnp
-  src/schemas/capnp/noderpc.capnp
+  src/schemas/capnp/chain.capnp
   src/schemas/capnp/mining.capnp
+  src/schemas/capnp/node.capnp
+  src/schemas/capnp/wallet.capnp
+  src/schemas/capnp/rpc.capnp
+  src/schemas/capnp/handler.capnp
   src/schemas/capnp/mp/proxy.capnp
 )
 
