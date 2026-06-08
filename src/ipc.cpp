@@ -160,6 +160,24 @@ int main(int argc, char** argv)
         return bytesToHex(req.send().wait(io.waitScope).getResult());
     };
 
+    handlers["getTxOut"] = [&] {
+        // Required args: <txid> (display hex) <n>; optional: <includeMempool> (default true).
+        if (argc < 5) {
+            std::cerr << "getTxOut requires <txid> <n> [includeMempool]\n";
+            return kj::str();
+        }
+        auto txid = hashHexToBytes(argv[3]);
+        uint32_t n = static_cast<uint32_t>(std::stoul(argv[4]));
+        bool includeMempool = argc > 5 ? (std::string(argv[5]) == "true" || std::string(argv[5]) == "1") : true;
+
+        auto req = nodeRpc.getTxOutRequest();
+        req.getContext().setThread(serverThread);
+        req.setTxid(kj::arrayPtr(txid.data(), txid.size()));
+        req.setN(n);
+        req.setIncludeMempool(includeMempool);
+        return prettyResult(req.send().wait(io.waitScope));
+    };
+
     std::string method = argv[2];
     auto it = handlers.find(method);
     if (it == handlers.end()) {
