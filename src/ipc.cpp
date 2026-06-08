@@ -232,6 +232,22 @@ int main(int argc, char** argv)
         return prettyResult(req.send().wait(io.waitScope));
     };
 
+    handlers["sendRawTransaction"] = [&] {
+        if (argc < 4) {
+            std::cerr << "sendRawTransaction requires <rawtx>\n";
+            return kj::str();
+        }
+        auto bytes = hexToBytes(argv[3]);
+
+        auto req = nodeRpc.sendRawTransactionRequest();
+        req.getContext().setThread(serverThread);
+        req.setTx(kj::arrayPtr(bytes.data(), bytes.size()));
+        // 0.1 BTC/kvB fee-rate cap; 0 burn allowance (Bitcoin's defaults).
+        req.setMaxFeeRate(10000000);
+        req.setMaxBurnAmount(0);
+        return kj::str(req.send().wait(io.waitScope).getResult());
+    };
+
     std::string method = argv[2];
     auto it = handlers.find(method);
     if (it == handlers.end()) {
