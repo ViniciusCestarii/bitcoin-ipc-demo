@@ -178,6 +178,34 @@ int main(int argc, char** argv)
         return prettyResult(req.send().wait(io.waitScope));
     };
 
+    handlers["getRawTransaction"] = [&] {
+        // Required arg: <txid> (display hex); optional: <verbose> (0/1, default 0),
+        // <blockHash> (display hex). verbose=0 prints the raw tx hex, verbose=1
+        // prints the decoded transaction details.
+        if (argc < 4) {
+            std::cerr << "getRawTransaction requires <txid> [verbose] [blockHash]\n";
+            return kj::str();
+        }
+        auto txid = hashHexToBytes(argv[3]);
+        bool verbose = argc > 4 ? (std::string(argv[4]) == "true" || std::string(argv[4]) == "1") : false;
+
+        auto req = nodeRpc.getRawTransactionRequest();
+        req.getContext().setThread(serverThread);
+        req.setTxid(kj::arrayPtr(txid.data(), txid.size()));
+        req.setVerbose(verbose);
+        if (argc > 5) {
+            auto blockHash = hashHexToBytes(argv[5]);
+            req.setBlockHash(kj::arrayPtr(blockHash.data(), blockHash.size()));
+        }
+
+        auto resp = req.send().wait(io.waitScope);
+        auto result = resp.getResult();
+        if (verbose) {
+            return capnp::prettyPrint(capnp::toDynamic(result.getDetails())).flatten();
+        }
+        return bytesToHex(result.getTx());
+    };
+
     std::string method = argv[2];
     auto it = handlers.find(method);
     if (it == handlers.end()) {
