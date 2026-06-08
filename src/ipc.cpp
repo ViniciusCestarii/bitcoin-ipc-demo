@@ -56,14 +56,20 @@ int main(int argc, char** argv)
         return capnp::prettyPrint(capnp::toDynamic(resp.getResult())).flatten();
     };
 
-    // Decode a display block hash (big-endian hex) into the raw internal byte
-    // order expected by the IPC `Data` field (reversed).
-    auto hashHexToBytes = [](const std::string& hex) {
+    // Decode a hex string into raw bytes, in order (e.g. a serialized tx).
+    auto hexToBytes = [](const std::string& hex) {
         std::vector<kj::byte> bytes;
         bytes.reserve(hex.size() / 2);
         for (size_t i = 0; i + 1 < hex.size(); i += 2) {
             bytes.push_back(static_cast<kj::byte>(std::stoi(hex.substr(i, 2), nullptr, 16)));
         }
+        return bytes;
+    };
+
+    // Decode a display hash (big-endian hex) into the raw internal byte order
+    // expected by the IPC `Data` field (reversed).
+    auto hashHexToBytes = [&hexToBytes](const std::string& hex) {
+        auto bytes = hexToBytes(hex);
         std::reverse(bytes.begin(), bytes.end());
         return bytes;
     };
@@ -204,6 +210,26 @@ int main(int argc, char** argv)
             return capnp::prettyPrint(capnp::toDynamic(result.getDetails())).flatten();
         }
         return bytesToHex(result.getTx());
+    };
+
+    handlers["testMempoolAccept"] = [&] {
+        // Required: one or more raw transactions (serialized hex, not hashes).
+        if (argc < 4) {
+            std::cerr << "testMempoolAccept requires <rawtx> [rawtx...]\n";
+            return kj::str();
+        }
+        int count = argc - 3;
+
+        auto req = nodeRpc.testMempoolAcceptRequest();
+        req.getContext().setThread(serverThread);
+        auto txns = req.initTxns(count);
+        for (int i = 0; i < count; i++) {
+            auto bytes = hexToBytes(argv[3 + i]);
+            txns.set(i, kj::arrayPtr(bytes.data(), bytes.size()));
+        }
+        // 0.1 BTC/kvB: Bitcoin's default max raw tx fee rate safety check.
+        req.setMaxFeeRate(10000000);
+        return prettyResult(req.send().wait(io.waitScope));
     };
 
     std::string method = argv[2];
