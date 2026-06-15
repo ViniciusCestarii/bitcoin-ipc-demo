@@ -84,6 +84,55 @@ int main(int argc, char** argv)
     // unregisters the notifications on the node side.
     auto handler = handleNotificationReq.send().wait(io.waitScope).getResult();
 
+    // Encode raw bytes (block hash in internal byte order) as big-endian
+    // display hex, matching how bitcoind shows hashes.
+    auto hashToHex = [](capnp::Data::Reader data) {
+        static const char* digits = "0123456789abcdef";
+        kj::Vector<char> hex(data.size() * 2);
+        for (size_t i = data.size(); i-- > 0;) {
+            hex.add(digits[data[i] >> 4]);
+            hex.add(digits[data[i] & 0x0f]);
+        }
+        return kj::str(hex.asPtr());
+    };
+
+    // Exercise a sequence of synchronous Chain calls: fetch the current height,
+    // then walk back over the most recent blocks requesting each hash in order.
+    auto heightResp = chain.getHeightRequest().send().wait(io.waitScope);
+    if (!heightResp.getHasResult()) {
+        std::cout << "getHeight: chain has no blocks yet\n";
+    } else {
+        int32_t tip = heightResp.getResult();
+        std::cout << "getHeight: " << tip << "\n";
+
+        constexpr int32_t kCount = 10;
+        int32_t from = tip - kCount + 1;
+        if (from < 0) from = 0;
+        // Fire two getBlockHash calls concurrently each iteration, then wait
+        // for both to come back before moving on to the next pair.
+        for (int32_t height = tip; height >= from; height -= 2) {
+            auto sendHash = [&](int32_t h) {
+                auto req = chain.getBlockHashRequest();
+                req.setHeight(h);
+                return req.send();
+            };
+
+            int32_t h0 = height;
+            int32_t h1 = height - 1;
+            auto promise0 = sendHash(h0);
+            bool hasSecond = h1 >= from;
+            auto promise1 = hasSecond ? sendHash(h1) : kj::Promise<capnp::Response<ipc::capnp::messages::Chain::GetBlockHashResults>>(nullptr);
+
+            auto resp0 = promise0.wait(io.waitScope);
+            std::cout << "getBlockHash(" << h0 << "): " << hashToHex(resp0.getResult()).cStr() << "\n";
+            if (hasSecond) {
+                auto resp1 = promise1.wait(io.waitScope);
+                std::cout << "getBlockHash(" << h1 << "): " << hashToHex(resp1.getResult()).cStr() << "\n";
+            }
+        }
+    }
+    std::cout.flush();
+
     std::cout << "Listening for transactionAddedToMempool notifications...\n";
     std::cout.flush();
 
