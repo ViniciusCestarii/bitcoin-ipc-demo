@@ -34,6 +34,15 @@ public:
         std::cout.flush();
         return kj::READY_NOW;
     }
+
+    // Default no-op handlers for the other chain notifications. Overriding
+    // them keeps the node from getting an "unimplemented method" error when it
+    // fires a notification we don't care about yet.
+    kj::Promise<void> transactionRemovedFromMempool(TransactionRemovedFromMempoolContext context) override { return kj::READY_NOW; }
+    kj::Promise<void> blockConnected(BlockConnectedContext context) override { return kj::READY_NOW; }
+    kj::Promise<void> blockDisconnected(BlockDisconnectedContext context) override { return kj::READY_NOW; }
+    kj::Promise<void> updatedBlockTip(UpdatedBlockTipContext context) override { return kj::READY_NOW; }
+    kj::Promise<void> chainStateFlushed(ChainStateFlushedContext context) override { return kj::READY_NOW; }
 };
 
 int main(int argc, char** argv)
