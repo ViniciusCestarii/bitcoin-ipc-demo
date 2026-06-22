@@ -48,7 +48,7 @@ interface ThreadMap $count(0) {
     # Pre-allocate a pool of server threads for implicit dispatch. When a
     # request arrives with no context.thread set, the server dispatches it
     # through this pool via a shared work queue.
-    makePool @1 (name :Text, count :UInt32) -> ();
+    makePool @1 (count :UInt32) -> ();
 }
 
 interface Thread {

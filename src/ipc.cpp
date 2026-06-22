@@ -66,23 +66,20 @@ int main(int argc, char** argv)
 
     auto init = client.bootstrap().castAs<ipc::capnp::messages::Init>();
 
-    auto constructReq = init.constructRequest();
-    auto constructResp = constructReq.send().wait(io.waitScope);
+    auto constructResp = init.constructRequest().send();
     auto serverThreadMap = constructResp.getThreadMap();
 
     auto makePoolReq = serverThreadMap.makePoolRequest();
-    makePoolReq.setName("client");
     makePoolReq.setCount(2);
-    makePoolReq.send().wait(io.waitScope);
+    auto poolPromise = makePoolReq.send();
 
-    auto chainReq = init.makeChainRequest();
-    auto chain = chainReq.send().wait(io.waitScope).getResult();
+    auto chain = init.makeChainRequest().send().getResult();
 
     auto handleNotificationReq = chain.handleNotificationsRequest();
     handleNotificationReq.setNotifications(kj::heap<NotificationsImpl>());
     // Keep the Handler alive for the lifetime of the program; dropping it
     // unregisters the notifications on the node side.
-    auto handler = handleNotificationReq.send().wait(io.waitScope).getResult();
+    auto handler = handleNotificationReq.send().getResult();
 
     // Encode raw bytes (block hash in internal byte order) as big-endian
     // display hex, matching how bitcoind shows hashes.
