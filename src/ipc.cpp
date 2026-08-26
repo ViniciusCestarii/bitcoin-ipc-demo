@@ -1,5 +1,6 @@
 #include <cstring>
 #include <iostream>
+#include <ostream>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -43,18 +44,19 @@ int main(int argc, char** argv)
 
     auto miningClient = init.makeMiningRequest().send().getResult();
 
-    auto collectTxsReq = miningClient.collectTxsRequest();
-    const kj::byte wtxidBytes[32] = { // random wtxid
-        0xb6, 0xf6, 0x99, 0x1d, 0x03, 0xdf, 0x0e, 0x2e,
-        0x04, 0xda, 0xff, 0xfc, 0xd6, 0xbc, 0x41, 0x8a,
-        0xac, 0x66, 0x04, 0x9e, 0x2c, 0xfa, 0x1b, 0x8d,
-        0x1a, 0x0f, 0x9f, 0xb7, 0x0f, 0x7c, 0x1a, 0x2f,
-    };
-    capnp::Data::Reader wtxid(wtxidBytes, sizeof(wtxidBytes));
-    collectTxsReq.setWtxids({wtxid});
-    auto txCollectionClient = collectTxsReq.send().getResult();
-    // finally call .wait(), all this is handled in a single round trip
-    auto unknownTxPosResult = txCollectionClient.unknownTxPosRequest().send().wait(io.waitScope).getResult();
+    auto blockTemplateRequest = miningClient.createNewBlockRequest();
+    blockTemplateRequest.setCooldown(false);
+    auto blockTemplate = blockTemplateRequest.send().getResult();
 
-    std::cout << "Unknown txs count: " << unknownTxPosResult.size() << std::endl;
+    auto coinbaseRequest = blockTemplate.getCoinbaseTxRequest().send();
+    auto feesRequest = blockTemplate.getTxFeesRequest().send();
+    auto blockSigopsRequest = blockTemplate.getTxSigopsRequest().send();
+
+    auto coinbase = coinbaseRequest.wait(io.waitScope).getResult();
+    auto fees = feesRequest.wait(io.waitScope).getResult();
+    auto blockSigops = blockSigopsRequest.wait(io.waitScope).getResult();
+
+    std::cout << "Coinbase Version " << coinbase.getVersion() << std::endl;
+    std::cout << "Fees " << fees.size() << std::endl;
+    std::cout << "Block sigops " << blockSigops.size() << std::endl;
 }
